@@ -65,6 +65,9 @@ jobs:
           name = "Lean_RV64D"
           path = "vendor/OfficialSailRiscVLeanH"
           EOF
+          cat > cutover/lake-manifest.json <<'EOF'
+          {"version":"1.1.0","packagesDir":".lake/packages","packages":[],"name":"SailCutoverValidation","lakeDir":".lake"}
+          EOF
           cat > cutover/SailAuthority.lean <<'EOF'
           import SailAuthority.KeyDecodes
           EOF
