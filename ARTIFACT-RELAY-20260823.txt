@@ -1,0 +1,1 @@
+Temporary pull-request trigger for downloading pinned official Sail-generated Lean sources and lean-sail v5 into the isolated build environment.
