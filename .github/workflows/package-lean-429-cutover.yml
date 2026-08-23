@@ -37,7 +37,7 @@ jobs:
           lint: false
           use-github-cache: false
 
-      - name: Package exact installed toolchain
+      - name: Package exact installed toolchain and split it
         shell: bash
         run: |
           set -euo pipefail
@@ -50,13 +50,35 @@ jobs:
             -C "$(dirname "$TOOLCHAIN")" -cf - "$(basename "$TOOLCHAIN")" \
             | zstd -3 -T0 -o out/lean-4.29.0-linux.tar.zst
           sha256sum out/lean-4.29.0-linux.tar.zst > out/lean-4.29.0-linux.tar.zst.sha256
+          split -b 250M -d -a 2 out/lean-4.29.0-linux.tar.zst out/lean-4.29.0-linux.tar.zst.part-
+          rm out/lean-4.29.0-linux.tar.zst
           ls -lh out
 
-      - name: Upload toolchain
+      - name: Upload toolchain part 00
         uses: actions/upload-artifact@v4
         with:
-          name: lean-4.29.0-linux-cutover
-          path: out
+          name: lean-4.29.0-linux-cutover-part-00
+          path: out/lean-4.29.0-linux.tar.zst.part-00
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload toolchain part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-4.29.0-linux-cutover-part-01
+          path: out/lean-4.29.0-linux.tar.zst.part-01
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Upload toolchain part 02 and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-4.29.0-linux-cutover-part-02-meta
+          path: |
+            out/lean-4.29.0-linux.tar.zst.part-02
+            out/lean-4.29.0-linux.tar.zst.sha256
           retention-days: 1
           compression-level: 0
           if-no-files-found: error
