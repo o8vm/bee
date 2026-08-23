@@ -5,6 +5,8 @@ on:
     branches: [artifact-download-relay-20260823]
     paths:
       - .github/workflows/generate-sail-executable-v047.yml
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -60,6 +62,7 @@ jobs:
           find "$PKG" -maxdepth 2 -type f -printf '%s %p\n' | sort -nr | sed -n '1,40p'
 
       - name: Publish generated executable source checkpoint before validation
+        if: github.event_name != 'pull_request'
         working-directory: sail-riscv
         shell: bash
         run: |
@@ -110,6 +113,7 @@ jobs:
           test -d .lake/packages/Sail
 
       - name: Publish validated self-contained executable model
+        if: github.event_name != 'pull_request'
         working-directory: sail-riscv
         shell: bash
         run: |
