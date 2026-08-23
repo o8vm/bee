@@ -4,3 +4,4 @@ Validation input: official default module closure.
 Validation methods: pinned source compiler and pinned 0.20.2 release binary.
 Downloadable source-artifact workflow enabled.
 Existing generated source upload workflow enabled.
+Pinned lean-sail v5 source upload enabled.
