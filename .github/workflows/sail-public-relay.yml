@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/sail-public-relay.yml
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -75,6 +77,7 @@ jobs:
           lake build
 
       - name: Publish source and validated bundle on public branch
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -82,7 +85,7 @@ jobs:
           set -euo pipefail
           PKG=sail-build/model/Lean_RV64D
           rm -rf public-output
-          mkdir -p public-output/source public-output/validated/vendor
+          mkdir -p public-output/validated/vendor
           cp -a "$PKG" public-output/validated/Lean_RV64D
           cp -a "$PKG/.lake/packages/Sail" public-output/validated/vendor/lean-sail
           rm -rf public-output/validated/Lean_RV64D/.lake public-output/validated/vendor/lean-sail/.lake public-output/validated/vendor/lean-sail/.git
