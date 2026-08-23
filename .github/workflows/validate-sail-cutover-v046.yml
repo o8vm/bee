@@ -1,0 +1,151 @@
+name: Validate destructive official Sail cutover v0.4.6
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout generated official Sail Lean source checkpoint
+        uses: actions/checkout@v5
+        with:
+          repository: o8vm/bee
+          ref: sail-v044-source-fast-20260823
+          path: generated
+          fetch-depth: 1
+
+      - name: Checkout pinned lean-sail v5
+        uses: actions/checkout@v5
+        with:
+          repository: rems-project/lean-sail
+          ref: v5
+          path: cutover/vendor/LeanSailV5
+          fetch-depth: 1
+
+      - name: Assemble cutover package with no local ISA model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p cutover/vendor/OfficialSailRiscVLeanH cutover/SailAuthority
+          cp -a generated/source/Lean_RV64D/. cutover/vendor/OfficialSailRiscVLeanH/
+          rm -rf cutover/vendor/OfficialSailRiscVLeanH/.lake cutover/vendor/LeanSailV5/.git cutover/vendor/LeanSailV5/.lake
+          cat > cutover/vendor/OfficialSailRiscVLeanH/lakefile.toml <<'EOF'
+          name = "Lean_RV64D"
+          defaultTargets = ["LeanRV64D"]
+          moreLeanArgs = ["--tstack=400000"]
+          [[lean_lib]]
+          name = "LeanRV64D"
+          leanOptions.weak.linter.style.nameCheck = false
+          moreLeancArgs = ["-fbracket-depth=500"]
+          [[require]]
+          name = "Sail"
+          path = "../LeanSailV5"
+          EOF
+          cat > cutover/lean-toolchain <<'EOF'
+          leanprover/lean4:v4.29.0
+          EOF
+          cat > cutover/lakefile.toml <<'EOF'
+          name = "SailCutoverValidation"
+          defaultTargets = ["SailAuthority"]
+          moreLeanArgs = ["--tstack=400000"]
+          [[lean_lib]]
+          name = "SailAuthority"
+          leanOptions.weak.linter.style.nameCheck = false
+          [[require]]
+          name = "Sail"
+          path = "vendor/LeanSailV5"
+          [[require]]
+          name = "Lean_RV64D"
+          path = "vendor/OfficialSailRiscVLeanH"
+          EOF
+          cat > cutover/SailAuthority.lean <<'EOF'
+          import SailAuthority.KeyDecodes
+          EOF
+          cat > cutover/SailAuthority/OfficialAPI.lean <<'EOF'
+          import LeanRV64D.DecodeExt
+          import LeanRV64D.InstsEnd
+          import LeanRV64D.Model
+          import LeanRV64D.Step
+          namespace SailAuthority
+          abbrev officialDecode := LeanRV64D.Functions.ext_decode
+          abbrev officialExecute := LeanRV64D.Functions.execute
+          abbrev officialTryStep := LeanRV64D.Functions.try_step
+          abbrev officialInitModel := LeanRV64D.Functions.init_model
+          abbrev officialInitBootRequirements := LeanRV64D.Functions.init_boot_requirements
+          abbrev OfficialInstruction := LeanRV64D.instruction
+          abbrev OfficialState := Sail.ConcurrencyInterfaceV1.SequentialState LeanRV64D.RegisterType Sail.ConcurrencyInterfaceV1.trivialChoiceSource
+          end SailAuthority
+          EOF
+          cat > cutover/SailAuthority/Decode.lean <<'EOF'
+          import SailAuthority.OfficialAPI
+          namespace SailAuthority
+          def decode? (word : UInt32) : Option OfficialInstruction :=
+            let bits : BitVec 32 := BitVec.ofNat 32 word.toNat
+            match (officialDecode bits).run (default : OfficialState) with
+            | .ok instruction _ => some instruction
+            | .error _ _ => none
+          def decodesAsEcall (word : UInt32) : Bool := match decode? word with | some (.ECALL ()) => true | _ => false
+          def decodesAsMret (word : UInt32) : Bool := match decode? word with | some (.MRET ()) => true | _ => false
+          def decodesAsSret (word : UInt32) : Bool := match decode? word with | some (.SRET ()) => true | _ => false
+          def decodesAsWfi (word : UInt32) : Bool := match decode? word with | some (.WFI ()) => true | _ => false
+          def decodesAsHfenceGvma (word : UInt32) : Bool := match decode? word with | some (.HFENCE_GVMA _) => true | _ => false
+          def decodesAsHfenceVvma (word : UInt32) : Bool := match decode? word with | some (.HFENCE_VVMA _) => true | _ => false
+          end SailAuthority
+          EOF
+          cat > cutover/SailAuthority/KeyDecodes.lean <<'EOF'
+          import SailAuthority.Decode
+          set_option maxHeartbeats 1_000_000_000
+          set_option maxRecDepth 1_000_000
+          namespace SailAuthority
+          theorem ecall_decodes_officially : decodesAsEcall 0x00000073 = true := by decide +kernel
+          theorem mret_decodes_officially : decodesAsMret 0x30200073 = true := by decide +kernel
+          theorem sret_decodes_officially : decodesAsSret 0x10200073 = true := by decide +kernel
+          theorem wfi_decodes_officially : decodesAsWfi 0x10500073 = true := by decide +kernel
+          theorem hfence_gvma_decodes_officially : decodesAsHfenceGvma 0x62000073 = true := by decide +kernel
+          theorem hfence_vvma_decodes_officially : decodesAsHfenceVvma 0x22000073 = true := by decide +kernel
+          end SailAuthority
+          EOF
+          if grep -R -En 'namespace[[:space:]]+CertifiedKernel\.RV64|structure[[:space:]]+HardwareRelation|def[[:space:]]+targetMachine|customMachine_refines|CompatLayer|LegacyMachine' cutover --include='*.lean'; then
+            echo 'forbidden local ISA model or compatibility layer' >&2
+            exit 1
+          fi
+
+      - name: Install Lean 4.29
+        uses: leanprover/lean-action@v1
+        with:
+          auto-config: false
+          lake-package-directory: cutover
+          build: false
+          test: false
+          lint: false
+          use-github-cache: false
+
+      - name: Build official-Sail cutover proof root
+        working-directory: cutover
+        shell: bash
+        run: |
+          set -euo pipefail
+          lake update
+          lake build SailAuthority
+          printf 'OFFICIAL_SAIL_CUTOVER_BUILD=PASS\n' | tee build-status.env
+
+      - name: Upload validation log and source
+        uses: actions/upload-artifact@v4
+        with:
+          name: sail-cutover-v046-validation
+          path: |
+            cutover/SailAuthority.lean
+            cutover/SailAuthority
+            cutover/lakefile.toml
+            cutover/lean-toolchain
+            cutover/build-status.env
+          retention-days: 1
+          compression-level: 9
+          if-no-files-found: error
