@@ -1,0 +1,145 @@
+name: Generate official Sail executable Lean model v0.4.7
+
+on:
+  push:
+    branches: [artifact-download-relay-20260823]
+    paths:
+      - .github/workflows/generate-sail-executable-v047.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SAIL_RISCV_REVISION: ac2a585506aad46b088b3594e56b8c21c52e297e
+  SAIL_VERSION: 0.20.2
+  SAIL_MODULES: I;M;A;H;Zicsr_insts;Zifencei;Sstc;postlude
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout workflow repository
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned official Sail RISC-V
+        uses: actions/checkout@v5
+        with:
+          repository: riscv/sail-riscv
+          ref: ${{ env.SAIL_RISCV_REVISION }}
+          path: sail-riscv
+          fetch-depth: 1
+
+      - name: Install pinned Sail toolchain
+        uses: ./sail-riscv/.github/actions/sail-setup
+        with:
+          sail-version: ${{ env.SAIL_VERSION }}
+
+      - name: Configure executable Lean backend only
+        working-directory: sail-riscv
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPRINT_EFFECTS=true \
+            -DSAIL_MODULES="$SAIL_MODULES"
+
+      - name: Generate official executable Lean definitions
+        working-directory: sail-riscv
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --target generated_lean_executable_rv64d --parallel 2
+          PKG=build/model/Lean_RV64D_executable
+          test -f "$PKG/LeanRV64D.lean"
+          test -d "$PKG/LeanRV64D"
+          du -sh "$PKG"
+          find "$PKG" -maxdepth 2 -type f -printf '%s %p\n' | sort -nr | sed -n '1,40p'
+
+      - name: Publish generated executable source checkpoint before validation
+        working-directory: sail-riscv
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG=build/model/Lean_RV64D_executable
+          OUT="$GITHUB_WORKSPACE/executable-source"
+          rm -rf "$OUT"
+          mkdir -p "$OUT/source"
+          cp -a "$PKG" "$OUT/source/Lean_RV64D_executable"
+          rm -rf "$OUT/source/Lean_RV64D_executable/.lake" "$OUT/source/Lean_RV64D_executable/.git"
+          cat > "$OUT/UPSTREAM-PIN.txt" <<EOF
+          sail_riscv_revision=$SAIL_RISCV_REVISION
+          sail_compiler_version=$SAIL_VERSION
+          sail_modules=$SAIL_MODULES
+          backend=generated_lean_executable_rv64d
+          validation_status=generated-not-yet-built
+          EOF
+          (cd "$OUT" && find source -type f -print0 | sort -z | xargs -0 sha256sum > SOURCE-SHA256SUMS)
+          tar --zstd -cf "$OUT/sail-riscv-H-executable-Lean-ac2a585-source.tar.zst" -C "$OUT" source UPSTREAM-PIN.txt SOURCE-SHA256SUMS
+          sha256sum "$OUT/sail-riscv-H-executable-Lean-ac2a585-source.tar.zst" > "$OUT/sail-riscv-H-executable-Lean-ac2a585-source.tar.zst.sha256"
+          ls -lh "$OUT"
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan sail-v047-executable-source-20260823
+          git rm -rf .
+          cp -a "$OUT"/. .
+          git add -A
+          git commit -m 'relay: official Sail executable Lean source v0.4.7 [skip ci]'
+          git push --force origin HEAD:sail-v047-executable-source-20260823
+
+      - name: Set up generated executable-model Lean package
+        uses: leanprover/lean-action@v1
+        with:
+          auto-config: false
+          lake-package-directory: sail-riscv/build/model/Lean_RV64D_executable
+          build: false
+          test: false
+          lint: false
+          use-github-cache: false
+
+      - name: Build generated executable Lean model
+        working-directory: sail-riscv/build/model/Lean_RV64D_executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          lake update
+          lake build
+          test -d .lake/packages/Sail
+
+      - name: Publish validated self-contained executable model
+        working-directory: sail-riscv
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG=build/model/Lean_RV64D_executable
+          OUT="$GITHUB_WORKSPACE/executable-validated"
+          rm -rf "$OUT"
+          mkdir -p "$OUT/validated/vendor"
+          cp -a "$PKG" "$OUT/validated/Lean_RV64D_executable"
+          cp -a "$PKG/.lake/packages/Sail" "$OUT/validated/vendor/LeanSailV5"
+          rm -rf "$OUT/validated/Lean_RV64D_executable/.lake" \
+            "$OUT/validated/vendor/LeanSailV5/.lake" \
+            "$OUT/validated/vendor/LeanSailV5/.git"
+          cp "$OUT/validated/Lean_RV64D_executable/lakefile.toml" "$OUT/validated/Lean_RV64D_executable/UPSTREAM-lakefile.toml"
+          perl -0pi -e 's#\[\[require\]\]\nname = "Sail"\ngit = "https://github.com/rems-project/lean-sail"\nrev = "v5"#[[require]]\nname = "Sail"\npath = "../vendor/LeanSailV5"#g' "$OUT/validated/Lean_RV64D_executable/lakefile.toml"
+          grep -F 'path = "../vendor/LeanSailV5"' "$OUT/validated/Lean_RV64D_executable/lakefile.toml"
+          cat > "$OUT/UPSTREAM-PIN.txt" <<EOF
+          sail_riscv_revision=$SAIL_RISCV_REVISION
+          sail_compiler_version=$SAIL_VERSION
+          sail_modules=$SAIL_MODULES
+          backend=generated_lean_executable_rv64d
+          validation_status=lake-build-passed
+          EOF
+          (cd "$OUT" && find validated -type f -print0 | sort -z | xargs -0 sha256sum > VALIDATED-SHA256SUMS)
+          tar --zstd -cf "$OUT/sail-riscv-H-executable-Lean-ac2a585-validated.tar.zst" -C "$OUT" validated UPSTREAM-PIN.txt VALIDATED-SHA256SUMS
+          sha256sum "$OUT/sail-riscv-H-executable-Lean-ac2a585-validated.tar.zst" > "$OUT/sail-riscv-H-executable-Lean-ac2a585-validated.tar.zst.sha256"
+          ls -lh "$OUT"
+          git checkout --orphan sail-v047-executable-validated-20260823
+          git rm -rf .
+          cp -a "$OUT"/. .
+          git add -A
+          git commit -m 'relay: validated official Sail executable Lean model v0.4.7 [skip ci]'
+          git push --force origin HEAD:sail-v047-executable-validated-20260823
