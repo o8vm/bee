@@ -1,0 +1,62 @@
+name: Package Lean 4.29 for Sail cutover
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Create minimal toolchain pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          printf '%s\n' 'leanprover/lean4:v4.29.0' > package/lean-toolchain
+          cat > package/lakefile.toml <<'EOF'
+          name = "toolchain-pin"
+          defaultTargets = []
+          EOF
+          cat > package/lake-manifest.json <<'EOF'
+          {"version":"1.2.0","packagesDir":".lake/packages","packages":[],"name":"toolchain-pin","lakeDir":".lake","fixedToolchain":false}
+          EOF
+
+      - name: Install Lean 4.29
+        uses: leanprover/lean-action@v1
+        with:
+          auto-config: false
+          lake-package-directory: package
+          build: false
+          test: false
+          lint: false
+          use-github-cache: false
+
+      - name: Package exact installed toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          LEAN_BIN=$(cd package && elan which lean)
+          TOOLCHAIN=$(dirname "$(dirname "$LEAN_BIN")")
+          test -x "$TOOLCHAIN/bin/lean"
+          "$TOOLCHAIN/bin/lean" --version
+          mkdir -p out
+          tar --sort=name --mtime='UTC 2026-08-23' --owner=0 --group=0 --numeric-owner \
+            -C "$(dirname "$TOOLCHAIN")" -cf - "$(basename "$TOOLCHAIN")" \
+            | zstd -3 -T0 -o out/lean-4.29.0-linux.tar.zst
+          sha256sum out/lean-4.29.0-linux.tar.zst > out/lean-4.29.0-linux.tar.zst.sha256
+          ls -lh out
+
+      - name: Upload toolchain
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-4.29.0-linux-cutover
+          path: out
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
