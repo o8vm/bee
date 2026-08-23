@@ -1,0 +1,123 @@
+name: Generate pinned Sail RISC-V Lean H bundle (binary Sail)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/sail-public-relay-fast.yml
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SAIL_RISCV_REVISION: ac2a585506aad46b088b3594e56b8c21c52e297e
+  SAIL_VERSION: 0.20.2
+  SAIL_MODULES: default
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies and pinned Sail binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build curl pkg-config libgmp-dev zstd
+          curl -L "https://github.com/rems-project/sail/releases/download/${SAIL_VERSION}-binary/sail-Linux-x86_64.tar.gz" \
+            | sudo tar xz -C /usr/local --strip-components=1
+          sail --version
+
+      - name: Checkout pinned official Sail RISC-V
+        uses: actions/checkout@v5
+        with:
+          repository: riscv/sail-riscv
+          ref: ac2a585506aad46b088b3594e56b8c21c52e297e
+          path: sail-riscv
+          fetch-depth: 1
+
+      - name: Generate official default Lean model including H
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S sail-riscv -B sail-build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build sail-build --target generated_lean_rv64d -j2
+          test -f sail-build/model/Lean_RV64D/LeanRV64D.lean
+
+      - name: Publish generated source checkpoint
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG=sail-build/model/Lean_RV64D
+          rm -rf source-output
+          mkdir -p source-output/source
+          cp -a "$PKG" source-output/source/Lean_RV64D
+          rm -rf source-output/source/Lean_RV64D/.lake source-output/source/Lean_RV64D/.git
+          cat > source-output/UPSTREAM-PIN.txt <<EOF
+          sail_riscv_revision=$SAIL_RISCV_REVISION
+          sail_compiler_version=$SAIL_VERSION
+          sail_modules=$SAIL_MODULES
+          validation_status=generated-not-yet-built
+          EOF
+          find source-output/source -type f -print0 | sort -z | xargs -0 sha256sum > source-output/SOURCE-SHA256SUMS
+          tar --zstd -cf source-output/sail-riscv-H-Lean-ac2a585-source-default.tar.zst -C source-output source UPSTREAM-PIN.txt SOURCE-SHA256SUMS
+          sha256sum source-output/sail-riscv-H-Lean-ac2a585-source-default.tar.zst > source-output/sail-riscv-H-Lean-ac2a585-source-default.tar.zst.sha256
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan sail-v044-source-fast-20260823
+          git rm -rf .
+          cp -a source-output/. .
+          git add -A
+          git commit -m "relay: generated official Sail RISC-V Lean source [skip ci]"
+          git push --force origin HEAD:sail-v044-source-fast-20260823
+          git checkout --detach "$GITHUB_SHA"
+
+      - name: Setup Lean and build generated model
+        uses: leanprover/lean-action@v1
+        with:
+          auto-config: false
+          lake-package-directory: sail-build/model/Lean_RV64D
+
+      - name: Validate generated package
+        working-directory: sail-build/model/Lean_RV64D
+        shell: bash
+        run: |
+          set -euo pipefail
+          lake update
+          lake build
+
+      - name: Publish validated bundle
+        if: github.event_name != 'pull_request'
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG=sail-build/model/Lean_RV64D
+          rm -rf output
+          mkdir -p output/validated/vendor
+          cp -a "$PKG" output/validated/Lean_RV64D
+          cp -a "$PKG/.lake/packages/Sail" output/validated/vendor/lean-sail
+          rm -rf output/validated/Lean_RV64D/.lake output/validated/vendor/lean-sail/.lake output/validated/vendor/lean-sail/.git
+          cat > output/UPSTREAM-PIN.txt <<EOF
+          sail_riscv_revision=$SAIL_RISCV_REVISION
+          sail_compiler_version=$SAIL_VERSION
+          sail_modules=$SAIL_MODULES
+          validation_status=lake-build-passed
+          EOF
+          find output/validated -type f -print0 | sort -z | xargs -0 sha256sum > output/VALIDATED-SHA256SUMS
+          tar --zstd -cf output/sail-riscv-H-Lean-ac2a585-validated.tar.zst -C output validated UPSTREAM-PIN.txt VALIDATED-SHA256SUMS
+          sha256sum output/sail-riscv-H-Lean-ac2a585-validated.tar.zst > output/sail-riscv-H-Lean-ac2a585-validated.tar.zst.sha256
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git checkout --orphan sail-v044-output-fast-20260823
+          git rm -rf .
+          cp -a output/. .
+          git add -A
+          git commit -m "relay: validated official Sail RISC-V H Lean bundle [skip ci]"
+          git push --force origin HEAD:sail-v044-output-fast-20260823
