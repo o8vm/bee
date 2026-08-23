@@ -1,0 +1,4 @@
+sail_riscv_revision=ac2a585506aad46b088b3594e56b8c21c52e297e
+sail_compiler_revision=8eb1fb6b5bf9f18c0f89f71e94ff0c5894acd7c1
+sail_modules=default
+validation_status=generated-not-yet-built
