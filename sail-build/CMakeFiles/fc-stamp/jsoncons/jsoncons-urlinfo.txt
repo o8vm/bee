@@ -1,0 +1,12 @@
+# This is a generated file and its contents are an internal implementation detail.
+# The download step will be re-executed if anything in this file changes.
+# No other meaning or use of this file is supported.
+
+method=url
+command=/usr/local/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/runner/work/bee/bee/sail-build/CMakeFiles/fc-stamp/jsoncons/download-jsoncons.cmake;COMMAND;/usr/local/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/runner/work/bee/bee/sail-build/CMakeFiles/fc-stamp/jsoncons/verify-jsoncons.cmake;COMMAND;/usr/local/bin/cmake;-DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE;-P;/home/runner/work/bee/bee/sail-build/CMakeFiles/fc-stamp/jsoncons/extract-jsoncons.cmake
+source_dir=/home/runner/work/bee/bee/sail-build/_deps/jsoncons-src
+work_dir=/home/runner/work/bee/bee/sail-build/_deps
+url(s)=https://github.com/danielaparker/jsoncons/archive/refs/tags/v1.8.1.tar.gz
+hash=SHA3_256=c1f7957049ce756005ce67917ce8b6f09c0cf56e630664edeb272365229baada
+      no_extract=
+
