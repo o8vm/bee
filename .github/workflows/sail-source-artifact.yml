@@ -1,0 +1,60 @@
+name: Generate pinned official Sail Lean source artifact
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SAIL_RISCV_REVISION: ac2a585506aad46b088b3594e56b8c21c52e297e
+  SAIL_VERSION: 0.20.2
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install pinned Sail binary and dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cmake ninja-build curl pkg-config libgmp-dev zstd
+          curl -L "https://github.com/rems-project/sail/releases/download/${SAIL_VERSION}-binary/sail-Linux-x86_64.tar.gz" | sudo tar xz -C /usr/local --strip-components=1
+      - name: Checkout official pinned Sail RISC-V
+        uses: actions/checkout@v5
+        with:
+          repository: riscv/sail-riscv
+          ref: ac2a585506aad46b088b3594e56b8c21c52e297e
+          path: sail-riscv
+          fetch-depth: 1
+      - name: Generate official default Lean model
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S sail-riscv -B sail-build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build sail-build --target generated_lean_rv64d -j2
+          test -f sail-build/model/Lean_RV64D/LeanRV64D.lean
+          rm -rf sail-build/model/Lean_RV64D/.lake sail-build/model/Lean_RV64D/.git
+          cat > UPSTREAM-PIN.txt <<EOF
+          sail_riscv_revision=$SAIL_RISCV_REVISION
+          sail_compiler_version=$SAIL_VERSION
+          sail_modules=default
+          validation_status=generated-source
+          EOF
+          tar --zstd -cf sail-riscv-H-Lean-ac2a585-source-default.tar.zst -C sail-build/model Lean_RV64D
+          sha256sum sail-riscv-H-Lean-ac2a585-source-default.tar.zst > sail-riscv-H-Lean-ac2a585-source-default.tar.zst.sha256
+      - name: Upload generated source
+        uses: actions/upload-artifact@v4
+        with:
+          name: sail-riscv-H-Lean-ac2a585-source-default
+          path: |
+            sail-riscv-H-Lean-ac2a585-source-default.tar.zst
+            sail-riscv-H-Lean-ac2a585-source-default.tar.zst.sha256
+            UPSTREAM-PIN.txt
+          retention-days: 1
+          compression-level: 0
