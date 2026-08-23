@@ -1,0 +1,39 @@
+name: Upload pinned lean-sail v5 source
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout lean-sail v5
+        uses: actions/checkout@v5
+        with:
+          repository: rems-project/lean-sail
+          ref: v5
+          path: lean-sail
+          fetch-depth: 1
+      - name: Package source
+        shell: bash
+        run: |
+          set -euo pipefail
+          revision=$(git -C lean-sail rev-parse HEAD)
+          rm -rf lean-sail/.git lean-sail/.lake
+          printf 'repository=https://github.com/rems-project/lean-sail\nrevision=%s\nref=v5\n' "$revision" > lean-sail/UPSTREAM-PIN.txt
+          tar --zstd -cf lean-sail-v5-source.tar.zst lean-sail
+          sha256sum lean-sail-v5-source.tar.zst > lean-sail-v5-source.tar.zst.sha256
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: lean-sail-v5-source
+          path: |
+            lean-sail-v5-source.tar.zst
+            lean-sail-v5-source.tar.zst.sha256
+          retention-days: 1
+          compression-level: 0
